@@ -205,7 +205,7 @@ Mappings:
       '100': 'ami-717b3502'
       '250': "ami-24752f57"
     us-east-1:
-      BYOL: "ami-44aaf953"
+      BYOL: "ami-1b9c4966"
       '10': "ami-b4affca3"
       '25': "ami-65a9fa72"
       '50': "ami-78aaf96f"
