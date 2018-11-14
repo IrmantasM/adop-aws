@@ -1,0 +1,402 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Nexus IQ Server Application Stack.
+Conditions:
+  HasKeyName:
+    Fn::Not:
+    - Fn::Equals:
+      - ''
+      - Ref: KeyName
+  HasLogGroupName:
+    Fn::Not:
+    - Fn::Equals:
+      - ''
+      - Ref: LogGroupName
+Mappings:
+  AmiRegionMap:
+    ap-southeast-2:
+      centos7: ami-24959b47
+    ca-central-1:
+      centos7: ami-daeb57be
+    eu-central-1:
+      centos7: ami-7cbc6e13
+    eu-west-1:
+      centos7: ami-0d063c6b
+    us-east-1:
+      centos7: ami-ae7bfdb8
+    us-east-2:
+      centos7: ami-9cbf9bf9
+    us-west-2:
+      centos7: ami-0c2aba6c
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: Launch configuration
+      Parameters:
+      - KeyName
+    - Label:
+        default: Network configuration
+      Parameters:
+      - VpcNetBlock
+      - SubnetAz
+    - Label:
+        default: Instance configuration
+      Parameters:
+      - InstanceType
+      - DeleteBlockDeviceOnTermination
+    - Label:
+        default: Nexus IQ Server version
+      Parameters:
+      - NexusIQVersion
+      - NexusIQSha256
+    - Label:
+        default: Java version
+      Parameters:
+      - JavaDownloadUrl
+      - JavaSha256
+    - Label:
+        default: Internal parameters
+      Parameters:
+      - ChefRecipeVersion
+    ParameterLabels:
+      ChefRecipeVersion:
+        default: Version of chef cookbook to install
+      DeleteBlockDeviceOnTermination:
+        default: Delete root block device on termination
+      InstanceType:
+        default: Instance type
+      JavaDownloadUrl:
+        default: Java Download Url
+      JavaSha256:
+        default: Java SHA-256
+      KeyName:
+        default: Key pair
+      LogGroupName:
+        default: CloudWatch log group name
+      NexusIQSha256:
+        default: Nexus IQ Server SHA-256
+      NexusIQVersion:
+        default: Nexus IQ Server version
+      SubnetAz:
+        default: Subnet network block
+      VpcNetBlock:
+        default: VPC network block
+Parameters:
+  ChefRecipeVersion:
+    Default: release-0.4.20180928-160558.8ffdd14
+    Description: Version of chef cookbook to install
+    Type: String
+  DeleteBlockDeviceOnTermination:
+    AllowedValues:
+    - 'false'
+    - 'true'
+    Default: 'false'
+    Description: Automatically delete the instance's root block device on instance
+      termination.
+    MinLength: 1
+    Type: String
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+  InstanceSubnet:
+    Description: Private subnet ID (ensure a NAT gateway is attached)
+    Type: AWS::EC2::Subnet::Id
+  InstanceType:
+    AllowedValues:
+    - t2.large
+    - t2.xlarge
+    - t2.2xlarge
+    - m4.large
+    - m4.xlarge
+    - m4.2xlarge
+    - m4.4xlarge
+    - m4.10xlarge
+    - m4.16xlarge
+    - m3.large
+    - m3.xlarge
+    - m3.2xlarge
+    Default: t2.large
+    Description: The instance type
+    MinLength: 1
+    Type: String
+  JavaDownloadUrl:
+    Default: http://download.oracle.com/otn-pub/java/jdk/8u192-b12/750e1c8617c5452694857ad95c3ee230/server-jre-8u192-linux-x64.tar.gz
+    Description: The Java download URL
+    MinLength: 1
+    Type: String
+  JavaSha256:
+    Default: 3d811a5ec65dc6fc261f488757bae86ecfe285a79992363b016f60cdb4dbe7e6
+    Description: The Java download SHA-256 hash
+    MinLength: 1
+    Type: String
+  KeyName:
+    Default: ''
+    Description: Your key pair name for this region
+    Type: String
+  LogGroupName:
+    Default: ''
+    Description: A custom log group name
+    Type: String
+  NexusIQSha256:
+    Default: d99c96285393cf6edc1d0034671861a5c40ad7dd8b9e688d0c6506a2fd696317
+    Description: The Nexus IQ Server SHA-256 hash
+    MinLength: 1
+    Type: String
+  NexusIQVersion:
+    Default: 1.53.0-01
+    Description: The Nexus IQ Server version
+    MinLength: 1
+    Type: String
+Resources:
+  InstanceRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+      - PolicyDocument:
+          Statement:
+          - Action:
+            - logs:Create*
+            - logs:PutLogEvents
+            - s3:GetObject
+            Effect: Allow
+            Resource:
+            - arn:aws:logs:*:*:*
+          Version: '2012-10-17'
+        PolicyName: InstanceRolePolicy
+    Type: AWS::IAM::Role
+  InstanceRoleInstanceProfile:
+    Properties:
+      Path: /
+      Roles:
+      - Ref: InstanceRole
+    Type: AWS::IAM::InstanceProfile
+  LogGroup:
+    Properties:
+      RetentionInDays: 7
+    Type: AWS::Logs::LogGroup
+  NexusInstance:
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          commands:
+            01_install_chef:
+              command: bash /tmp/install.sh
+              cwd: /var/chef
+            02_chef_solo:
+              command:
+                Fn::Join:
+                - ''
+                - - 'chef-solo -c /var/chef/chef-repo/.chef/solo.rb -j /var/chef/chef-repo/.chef/solo.json
+                    --recipe-url '
+                  - https://github.com/sonatype/chef-nexus-iq-server/releases/download/
+                  - Ref: ChefRecipeVersion
+                  - /chef-nexus-iq-server.tar.gz
+              cwd: /var/chef/chef-repo
+          files:
+            /tmp/install.sh:
+              group: root
+              mode: '000400'
+              owner: root
+              source: https://omnitruck.chef.io/install.sh
+            /var/chef/chef-repo/.chef/solo.json:
+              content:
+                Fn::Join:
+                - '
+
+                  '
+                - - '{'
+                  - '  "run_list": ["recipe[nexus_iq_server]"],'
+                  - '  "java": {'
+                  - '    "jdk": {'
+                  - '      "8": {'
+                  - '        "x86_64": {'
+                  - Fn::Join:
+                    - ''
+                    - - '          "url": "'
+                      - Ref: JavaDownloadUrl
+                      - '",'
+                  - Fn::Join:
+                    - ''
+                    - - '          "checksum": "'
+                      - Ref: JavaSha256
+                      - '"'
+                  - '        }'
+                  - '      }'
+                  - '    }'
+                  - '  },'
+                  - '  "nexus_iq_server": {'
+                  - Fn::Join:
+                    - ''
+                    - - '    "version": "'
+                      - Ref: NexusIQVersion
+                      - '",'
+                  - Fn::Join:
+                    - ''
+                    - - '    "checksum": "'
+                      - Ref: NexusIQSha256
+                      - '"'
+                  - '  }'
+                  - '}'
+              group: root
+              mode: '000400'
+              owner: root
+            /var/chef/chef-repo/.chef/solo.rb:
+              content: 'cookbook_path [ ''/var/chef/chef-repo/cookbooks'' ]
+
+                file_cache_path ''/tmp''
+
+                '
+              group: root
+              mode: '000400'
+              owner: root
+    Properties:
+      BlockDeviceMappings:
+      - DeviceName: /dev/sda1
+        Ebs:
+          DeleteOnTermination:
+            Ref: DeleteBlockDeviceOnTermination
+      IamInstanceProfile:
+        Ref: InstanceRoleInstanceProfile
+      ImageId:
+        Fn::FindInMap:
+        - AmiRegionMap
+        - Ref: AWS::Region
+        - centos7
+      InstanceType:
+        Ref: InstanceType
+      KeyName:
+        Fn::If:
+        - HasKeyName
+        - Ref: KeyName
+        - Ref: AWS::NoValue
+      NetworkInterfaces:
+      - AssociatePublicIpAddress: 'false'
+        DeleteOnTermination: 'true'
+        DeviceIndex: 0
+        GroupSet:
+        - Ref: InstanceSecurityGroup
+        SubnetId:
+          Ref: InstanceSubnet
+      Tags:
+      - Key: Platform
+        Value: nexus-iq-server
+      - Key: Version
+        Value:
+          Ref: NexusIQVersion
+      - Key: Name
+        Value:
+          Ref: AWS::StackName
+      UserData:
+        Fn::Base64:
+          Fn::Join:
+          - '
+
+            '
+          - - '#cloud-config'
+            - 'packages:'
+            - ' - wget'
+            - ' - python'
+            - ' - ruby'
+            - ' - epel-release'
+            - 'bootcmd:'
+            - ' - ''echo [main] > /etc/yum/pluginconf.d/fastestmirror.conf'''
+            - ' - ''echo enabled=0 >> /etc/yum/pluginconf.d/fastestmirror.conf'''
+            - 'users:'
+            - ' - default'
+            - ' - awslogs'
+            - 'write_files:'
+            - ' - content: |'
+            - '     [general]'
+            - '     state_file=/var/awslogs/agent-state'
+            - '     [cloud-init.log]'
+            - '     file = /var/log/cloud-init.log'
+            - Fn::Join:
+              - ''
+              - - '     log_group_name = '
+                - Fn::If:
+                  - HasLogGroupName
+                  - Ref: LogGroupName
+                  - Ref: LogGroup
+            - '     log_stream_name = {instance_id}/cloud-init.log'
+            - '     datetime_format = %Y-%m-%d %H:%M:%S,%f'
+            - '     multi_line_start_pattern = {datetime_format}'
+            - '     [cloud-init-output.log]'
+            - '     file = /var/log/cloud-init-output.log'
+            - Fn::Join:
+              - ''
+              - - '     log_group_name = '
+                - Fn::If:
+                  - HasLogGroupName
+                  - Ref: LogGroupName
+                  - Ref: LogGroup
+            - '     log_stream_name = {instance_id}/cloud-init-output.log'
+            - '     datetime_format = %Y-%m-%d %H:%M:%S,%f'
+            - '     multi_line_start_pattern = {datetime_format}'
+            - '     [cfn-init-cmd.log]'
+            - '     file = /var/log/cfn-init-cmd.log'
+            - Fn::Join:
+              - ''
+              - - '     log_group_name = '
+                - Fn::If:
+                  - HasLogGroupName
+                  - Ref: LogGroupName
+                  - Ref: LogGroup
+            - '     log_stream_name = {instance_id}/cfn-init-cmd.log'
+            - '     datetime_format = %Y-%m-%d %H:%M:%S,%f'
+            - '     multi_line_start_pattern = {datetime_format}'
+            - '     [clm-server.log]'
+            - '     file = /var/log/nexus-iq-server/clm-server.log'
+            - Fn::Join:
+              - ''
+              - - '     log_group_name = '
+                - Fn::If:
+                  - HasLogGroupName
+                  - Ref: LogGroupName
+                  - Ref: LogGroup
+            - '     log_stream_name = {instance_id}/clm-server.log'
+            - '     datetime_format = %Y-%m-%d %H:%M:%S,%f%z'
+            - '     multi_line_start_pattern = {datetime_format}'
+            - '   path: /etc/awslogs/nexus.conf'
+            - '   permissions: ''0644'''
+            - ' - content: |'
+            - '     #!/bin/sh'
+            - '     set -x'
+            - '     wget -nv --retry-connrefused -tinf --waitretry=5 -T5 https://s3.amazonaws.com/aws-cloudwatch/downloads/latest/awslogs-agent-setup.py
+              -O /tmp/awslogs-agent-setup.py'
+            - '     wget -nv --retry-connrefused -tinf --waitretry=5 -T5 https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz
+              -O /tmp/aws-cfn-bootstrap-latest.tar.gz'
+            - Fn::Join:
+              - ''
+              - - '     python /tmp/awslogs-agent-setup.py -n -r '
+                - Ref: AWS::Region
+                - ' -c /etc/awslogs/nexus.conf'
+            - '     yum install -y pip'
+            - '     type aws || pip install awscli'
+            - '     service awslogs start'
+            - '     mkdir -p /opt/aws-cfn-bootstrap/'
+            - '     tar -xzf /tmp/aws-cfn-bootstrap-latest.tar.gz -C /opt/aws-cfn-bootstrap/
+              --strip-components=1'
+            - '     cd /opt/aws-cfn-bootstrap && python setup.py install'
+            - Fn::Join:
+              - ''
+              - - '     region='
+                - Ref: AWS::Region
+            - Fn::Join:
+              - ''
+              - - '     stackname='
+                - Ref: AWS::StackName
+            - '     python /opt/aws-cfn-bootstrap/bin/cfn-init -v --stack $stackname
+              --resource NexusInstance --region $region'
+            - '   path: /opt/cloudformation/install-aws.sh'
+            - '   permissions: ''0755'''
+            - 'runcmd:'
+            - ' - /opt/cloudformation/install-aws.sh'
+    Type: AWS::EC2::Instance

@@ -1,0 +1,58 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: |
+  Security Group template for Nexus IQ Server, with access to LDAP.
+Outputs:
+  InstanceSecurityGroup:
+    Value:
+      Ref: InstanceSecurityGroup
+Parameters:
+  VpcId:
+    Description: |
+      The VPC IP with ADOP/C provisioned.
+    Type: AWS::EC2::VPC::Id
+  LDAPSG:
+    Description: Security Group your LDAP instance is running in e.g. ADOP/C SecurityGroup (REQUIRED)
+    Type: AWS::EC2::SecurityGroup::Id
+  VpnIpWhiteListCidr:
+    Description: |
+      The Cidr range of IPs to whitelist.
+      By default open to the world.
+    Type: String
+    Default: 0.0.0.0/0
+
+Resources:
+
+  InstanceSecurityGroup:
+    Properties:
+      GroupDescription: Nexus IQ EC2 Security Group
+      SecurityGroupIngress:
+      - CidrIp:
+          Ref: VpnIpWhiteListCidr
+        FromPort: '22'
+        IpProtocol: tcp
+        ToPort: '22'
+      - CidrIp:
+          Ref: VpnIpWhiteListCidr
+        FromPort: '8070'
+        IpProtocol: tcp
+        ToPort: '8070'
+      Tags:
+      - Key: Service
+        Value: nexus-iq
+      VpcId:
+        Ref: VpcId
+    Type: AWS::EC2::SecurityGroup
+
+  LDAPBaseIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: LDAPSG
+      IpProtocol: tcp
+      FromPort: '389'
+      ToPort: '389'
+      SourceSecurityGroupId:
+        Ref: InstanceSecurityGroup
+...
